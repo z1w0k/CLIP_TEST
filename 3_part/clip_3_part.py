@@ -26,14 +26,15 @@ preprocess = weights.transforms()
 imagenet_labels = weights.meta["categories"]
 
 dataset = Imagenette(root = './data', split = 'val', download = True)
+class_names = []
 
-class_names = ['tench', 'English springer', 'cassette player', 'chain saw',
-               'church', 'French horn', 'garbage truck', 'gas pump',
-               'golf ball', 'parachute']
+for names in dataset.classes:
+  class_names.append(names[0])
+
 my_indices = []
 
 for class_name in class_names:
-    for index, label in enumerate(imagenet_labels):
+    for index, label_text in enumerate(imagenet_labels):
         if class_name.lower() in label_text.lower():
             my_indices.append(index)
             break
