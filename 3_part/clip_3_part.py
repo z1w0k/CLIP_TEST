@@ -16,11 +16,11 @@ import torchvision.models as models
 from torchvision.models import ResNet50_Weights
 from sklearn.metrics import accuracy_score
 
-model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to("cuda")
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
 weights = ResNet50_Weights.DEFAULT
-resnet_model = models.resnet50(weights=weights)
+resnet_model = models.resnet50(weights=weights).to("cuda")
 resnet_model.eval()
 preprocess = weights.transforms()
 imagenet_labels = weights.meta["categories"]
@@ -46,24 +46,31 @@ y_pred_resnet = []
 y_true_clip = []
 y_true_resnet = []
 
-text_inputs = processor(text = prompts, return_tensors = 'pt', padding = True)
-text_features = model.get_text_features(**text_inputs).pooler_output
-text_features = text_features / text_features.norm(dim = 1, keepdim = True)
+with torch.no_grad():
+  text_inputs = processor(text = prompts, return_tensors = 'pt', padding = True).to("cuda")
+  text_features = model.get_text_features(**text_inputs).pooler_output
+  text_features = text_features / text_features.norm(dim = 1, keepdim = True)
 
 for image, label in tqdm.tqdm(dataset, desc = 'Total'):
-  image_inputs = processor(images = image, return_tensors = 'pt', padding = True)
-  image_features = model.get_image_features(**image_inputs).pooler_output
-  image_features = image_features / image_features.norm(dim = 1, keepdim = True)
+  with torch.no_grad():
+    image_inputs = processor(images = image, return_tensors = 'pt', padding = True).to("cuda")
+    image_features = model.get_image_features(**image_inputs).pooler_output
+    image_features = image_features / image_features.norm(dim = 1, keepdim = True)
 
-  similarity = image_features @ text_features.T
+  logit_scale = model.logit_scale.exp().item()
+  temperature = 1.0 / logit_scale
+
+  similarity = (image_features @ text_features.T) * temperature
   clip_pred = similarity.argmax(dim = 1)
 
-  y_pred_clip.append(clip_pred)
+  y_pred_clip.append(clip_pred.cpu().item())
   y_true_clip.append(label)
 
-  batch = preprocess(image).unsqueeze(0)
-  prediction = resnet_model(batch)
-  class_id = prediction.argmax().item()
+  batch = preprocess(image).unsqueeze(0).to("cuda")
+
+  with torch.no_grad():
+    prediction = resnet_model(batch)
+    class_id = prediction.argmax().item()
 
   if class_id in my_indices:
     resnet_pred = my_indices.index(class_id)

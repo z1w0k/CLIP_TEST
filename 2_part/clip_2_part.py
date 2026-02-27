@@ -15,7 +15,7 @@ import torch
 import tqdm
 from sklearn.metrics import accuracy_score, f1_score
 
-model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to("cuda")
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
 dataset = Imagenette(root = './data', split = 'val', download = True)
@@ -29,19 +29,24 @@ prompts = [f"a photo of {name}" for name in class_names]
 y_true = []
 y_pred = []
 
-text_inputs = processor(text = prompts, return_tensors = 'pt', padding = True)
-text_features = model.get_text_features(**text_inputs).pooler_output
-text_features = text_features / text_features.norm(dim = 1, keepdim = True)
+with torch.no_grad():
+  text_inputs = processor(text = prompts, return_tensors = 'pt', padding = True).to("cuda")
+  text_features = model.get_text_features(**text_inputs).pooler_output
+  text_features = text_features / text_features.norm(dim = 1, keepdim = True)
 
 for image, label in tqdm.tqdm(dataset, desc = 'Total'):
-  image_inputs = processor(images = image, return_tensors = 'pt', padding = True)
-  image_features = model.get_image_features(**image_inputs).pooler_output
-  image_features = image_features / image_features.norm(dim = 1, keepdim = True)
+  with torch.no_grad():
+    image_inputs = processor(images = image, return_tensors = 'pt', padding = True).to("cuda")
+    image_features = model.get_image_features(**image_inputs).pooler_output
+    image_features = image_features / image_features.norm(dim = 1, keepdim = True)
 
-  similarity = image_features @ text_features.T
+  logit_scale = model.logit_scale.exp().item()
+  temperature = 1.0 / logit_scale
+
+  similarity = (image_features @ text_features.T) * temperature
   pred = similarity.argmax(dim = 1)
 
-  y_pred.append(pred)
+  y_pred.append(pred.cpu().item())
   y_true.append(label)
 
 accuracy = accuracy_score(y_true, y_pred)
